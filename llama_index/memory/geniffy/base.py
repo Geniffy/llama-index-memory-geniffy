@@ -50,7 +50,7 @@ def _default_client() -> Any:
             if old.is_closed():
                 _shared.pop(key, None)
         from geniffy import AsyncGeniffy
-        held = _shared[id(loop)] = (loop, AsyncGeniffy())
+        held = _shared[id(loop)] = (loop, _made(AsyncGeniffy))
     return held[1]
 
 
@@ -202,3 +202,13 @@ def geniffy_tools(*, space: Optional[str] = ..., client: Any = None) -> List[Fun
 
     return [FunctionTool.from_defaults(async_fn=recall, name="recall"),
             FunctionTool.from_defaults(async_fn=remember, name="remember")]
+
+
+def _made(cls: Any) -> Any:
+    """A client of the geniffy SDK, named after this package, so the Requests page in the Geniffy app shows
+    which integration made each call. A geniffy before 0.2.0 has no name to give, and makes a plain client."""
+    from . import __version__
+    try:
+        return cls(integration=f"llama-index-memory-geniffy/{__version__}")
+    except TypeError:
+        return cls()
