@@ -5,9 +5,10 @@
 # Geniffy for LlamaIndex
 
 Give a LlamaIndex agent a memory of each of your users. Add one memory block, and before the agent answers,
-LlamaIndex puts what is known about the user into the system message, each line with where it came from.
-After the run, save the exchange. When nothing is known, the model is told so, and says so instead of
-guessing.
+LlamaIndex puts the user's briefing into the system message: where things stand, what is due, the rules that
+apply, what happened, and what is known that bears on their message. After each run, save it, tool calls
+included, into one memory for the whole conversation. When nothing is known, the model is told so, and says so
+instead of guessing.
 
 [![CI](https://github.com/Geniffy/llama-index-memory-geniffy/actions/workflows/ci.yml/badge.svg)](https://github.com/Geniffy/llama-index-memory-geniffy/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/llama-index-memory-geniffy)](https://pypi.org/project/llama-index-memory-geniffy/)
@@ -30,23 +31,35 @@ from llama_index.memory.geniffy import GeniffyMemoryBlock
 agent = FunctionAgent(llm=Anthropic(model="claude-opus-5-5"), system_prompt="You are a helpful assistant.")
 
 
-async def chat(user_id: str, message: str) -> str:
+async def chat(user_id: str, chat_id: str, message: str) -> str:
     block = GeniffyMemoryBlock(space=f"user_{user_id}")       # the user from your own sign-in
-    memory = Memory.from_defaults(session_id=f"user_{user_id}", memory_blocks=[block])
+    memory = Memory.from_defaults(session_id=chat_id, memory_blocks=[block])
     reply = await agent.run(user_msg=message, memory=memory)
-    await block.remember(message, reply)                      # the exchange, saved to that user's space
+    await block.save(memory)                                  # the run, saved into that user's conversation
     return str(reply)
 ```
 
-- **Before the agent answers**, what is known that bears on the user's latest message goes in the system
-  message, inside LlamaIndex's `<memory>` section. In a run with tools, Geniffy is asked once, not once per step.
-- **`remember()`** saves the exchange. LlamaIndex only hands a block the messages that overflow its short-term
-  history, which most conversations never reach, so each exchange is saved this way instead. To save the
-  overflow too, pass `accept_short_term_memory=True` and don't call `remember()`, or an exchange is saved twice.
+- **Before the agent answers**, the user's briefing goes in the system message, inside LlamaIndex's `<memory>`
+  section: where things stand, what is due or was promised, the rules that apply, what happened, then what is
+  known that bears on their latest message, each line dated. In a run with tools, Geniffy is asked once, not once
+  per step.
+- **`save(memory)`** keeps the run that just finished: what the user said, each tool the agent called and what it
+  returned, and the answer. The Memory's `session_id` is the conversation, and a conversation is one memory however
+  long it gets. Saving the same run twice sends nothing the second time, and a save that fails goes with the next
+  one. An app that keeps the history itself passes its messages and `session=` its id instead.
 - **If Geniffy can't be reached**, the agent goes on without memory, and `on_error` hears about it.
 
-Options: `instructions` to change what the model is told about the memory, and `client` to share your own
-`geniffy.AsyncGeniffy`. Without one, a client is made for each event loop and shared by every block.
+Options: `project` keeps the briefing to one project and labels what is saved with it; `briefing=False` reads only
+what bears on the user's latest message; `budget_chars` is the most the briefing adds (6,000 characters unless you
+say); `instructions` changes what the model is told about the memory; and `client` shares your own
+`geniffy.AsyncGeniffy`. Without one, a client is made for each event loop and shared by every block. An account
+without the briefing switched on is given what bears on the latest message instead, and the briefing is tried
+again ten minutes later.
+
+LlamaIndex hands a block only the messages that overflow its short-term history, which most conversations never
+reach, so `save()` is how each run gets to Geniffy. To save the overflow instead, pass
+`accept_short_term_memory=True` and don't call `save()`, or a run is saved twice. `remember(message, reply)` still
+saves a single exchange, without the tool calls.
 
 ## Tools
 
@@ -71,6 +84,7 @@ from the [geniffy](https://pypi.org/project/geniffy/) SDK.
 
 ```bash
 pip install -e ".[test]" && pytest     # through LlamaIndex's own FunctionAgent and Memory, with a scripted LLM
+                                       # and the real geniffy client against a stand-in for the API
 ```
 
 ## Security
